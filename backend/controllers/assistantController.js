@@ -1,0 +1,276 @@
+console.log("Using OpenRouter...");
+console.log("Key exists:", !!process.env.OPENROUTER_API_KEY);
+
+const axios = require("axios");
+const Expense = require("../models/Expense");
+
+const chatWithAssistant = async (req, res) => {
+  console.log("=================================");
+  console.log("NEW ASSISTANT CONTROLLER EXECUTED");
+  console.log("=================================");
+
+  try {
+    const { message } = req.body;
+
+    console.log("User Question:");
+    console.log(message);
+    
+    const userMessage = message.toLowerCase();
+
+    const financeKeywords = [
+  "expense",
+  "expenses",
+  "spending",
+  "spent",
+  "total",
+  "amount",
+  "transaction",
+  "transactions",
+  "money",
+  "cost",
+  "budget",
+  "finance",
+  "financial",
+  "saving",
+  "savings",
+  "category",
+  "categories",
+  "analytics",
+  "analysis",
+  "income",
+  "food",
+  "rent",
+  "transport",
+  "investment",
+  "healthcare",
+  "entertainment",
+  "highest",
+  "lowest",
+  "average",
+  "summary",
+  "report",
+  "latest",
+  "month",
+  "year",
+  "today",
+  "yesterday",
+  "recommendation",
+  "recommendations",
+  "insight",
+  "insights",
+  "top",
+  "most",
+  "least"
+];
+
+const isFinanceQuery = financeKeywords.some((keyword) =>
+  userMessage.includes(keyword)
+);
+console.log("Question:", userMessage);
+console.log("Finance Query:", isFinanceQuery);
+
+
+
+    // Fetch all expenses from MongoDB
+    const expenses = await Expense.find().sort({ expenseDate: 1 });
+
+    // Calculate total expenses
+    const totalExpenses = expenses.reduce(
+      (sum, expense) => sum + expense.amount,
+      0
+    );
+
+    // Calculate category-wise totals
+    const categoryTotals = {};
+
+    expenses.forEach((expense) => {
+      if (!categoryTotals[expense.category]) {
+        categoryTotals[expense.category] = 0;
+      }
+
+      categoryTotals[expense.category] += expense.amount;
+    });
+
+    // Find top spending category
+    let topCategory = "";
+    let topCategoryAmount = 0;
+
+    for (const category in categoryTotals) {
+      if (categoryTotals[category] > topCategoryAmount) {
+        topCategoryAmount = categoryTotals[category];
+        topCategory = category;
+      }
+    }
+
+    const totalRecords = expenses.length;
+
+    const averageExpense =
+      totalRecords > 0
+        ? (totalExpenses / totalRecords).toFixed(2)
+        : 0;
+
+    // Build transaction history for AI
+    const expenseHistory =
+      expenses.length > 0
+        ? expenses
+            .map((expense, index) => {
+              const date = new Date(
+                expense.expenseDate
+              ).toLocaleDateString("en-IN");
+
+              return `${index + 1}. ${
+                expense.description
+              } | ₹${expense.amount} | ${
+                expense.category
+              } | ${date}`;
+            })
+            .join("\n")
+        : "No expenses available.";
+
+    // Create financial context
+    const financialContext = `
+You are SmartExpense AI, an expert Financial Analyst, Budget Consultant, and Expense Auditor.
+
+Your purpose is to analyze the user's real expense data and generate professional financial insights.
+
+IMPORTANT:
+- All amounts are in Indian Rupees (₹).
+- Never use USD or $.
+- Use only the expense data provided below.
+- Never invent transactions or categories.
+- If information cannot be derived from the data, respond:
+"I can only answer questions based on your expense records available in SmartExpense."
+
+================================================
+
+USER FINANCIAL SUMMARY
+
+Total Expenses: ₹${totalExpenses}
+
+Total Transactions: ${totalRecords}
+
+Average Expense: ₹${averageExpense}
+
+Top Spending Category:
+${topCategory || "None"} (₹${topCategoryAmount || 0})
+
+================================================
+
+CATEGORY BREAKDOWN
+
+${JSON.stringify(categoryTotals, null, 2)}
+
+================================================
+
+TRANSACTION HISTORY
+
+${expenseHistory}
+
+================================================
+
+Rules for Response Formatting:
+
+1. Always structure responses as professional financial reports.
+2. Use markdown headings (#, ##).
+3. Use bullet points for summaries.
+4. Use numbered lists for rankings.
+5. Use ✓ for recommendations.
+6. Use horizontal separators (---).
+7. Use bold text for important values.
+8. Always answer using the provided expense data.
+9. Use category totals for category analysis.
+10. Use transaction history for date-based analysis.
+11. Use transaction history for monthly analysis.
+12. If asked about a month, calculate using expense dates.
+13. If asked about highest spending month, analyze transaction dates.
+14. If asked about expenses in a month, list matching expenses.
+15. If asked about latest expenses, use transaction history.
+16. Mention exact amounts whenever possible.
+17. Never say you don't have enough information if the answer can be derived from the transaction history.
+18. Always use ₹ and never use $.
+19. Provide actionable recommendations whenever useful.
+20. Keep answers detailed, structured, and professional.
+21. You are NOT a general-purpose chatbot.
+
+22. You can answer ONLY using the expense records, transaction history, category totals, analytics, and financial information provided in this context.
+
+23. If the answer cannot be directly derived from the provided expense data, respond ONLY with:
+
+"I can only answer questions based on your expense records available in SmartExpense."
+
+24. Do not answer general knowledge, sports, movies, coding, science, politics, history, weather, or any topic outside the provided expense data.
+
+25. Never invent information not present in the expense records.
+26. Use only exact category names from the database.
+27. Do not assume reasons for purchases.
+28. When rejecting a question, provide no additional explanation, analysis, recommendations, or summaries.
+
+`;
+
+    console.log("Financial Context:");
+    console.log(financialContext);
+    // Send to OpenRouter
+
+    console.log(
+  "Using model:",
+  process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat"
+);
+    const response = await axios.post(
+  "https://openrouter.ai/api/v1/chat/completions",
+  {
+    model:
+  process.env.OPENROUTER_MODEL ||
+  "deepseek/deepseek-chat",
+    messages: [
+      {
+        role: "system",
+        content: financialContext,
+      },
+      {
+        role: "user",
+        content: message,
+      },
+    ],
+    temperature: 0.4,
+    max_tokens: 2000,
+  },
+  {
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "http://localhost:3000",
+      "X-Title": "SmartExpense AI Assistant",
+    },
+    timeout: 60000,
+  }
+);
+
+    const reply = response.data.choices[0].message.content;
+
+    console.log("=================================");
+    console.log("AI Reply:");
+    console.log(reply);
+    console.log("=================================");
+
+    res.status(200).json({
+      success: true,
+      reply,
+    });
+  } catch (error) {
+    console.error("=================================");
+    console.error("AI ERROR:");
+    console.error(JSON.stringify(error.response?.data, null, 2));
+    console.error(error.response?.data || error.message);
+    console.error("=================================");
+
+    res.status(500).json({
+      success: false,
+      message: "AI Assistant failed",
+      error: error.response?.data || error.message,
+    });
+  }
+};
+
+module.exports = {
+  chatWithAssistant,
+};
